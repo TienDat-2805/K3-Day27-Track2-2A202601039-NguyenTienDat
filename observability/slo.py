@@ -35,17 +35,30 @@ def evaluate_multiwindow_burn(
     *,
     short_window_burn: float,
     long_window_burn: float,
-    policy: str = "starter",
+    policy: str = "standard",
 ) -> dict[str, Any]:
-    """TODO(student): implement a real multi-window burn-rate policy.
+    """Evaluate paired short/long burn windows.
 
-    Starter intentionally never pages. Hidden evaluation contains cases that
-    require distinguishing sustained fast burn from a transient spike.
+    Both windows must cross a threshold, preventing a brief spike from paging.
+    Thresholds follow the common fast/slow burn pattern: 14.4x pages, while a
+    sustained 6x burn creates a ticket/high-priority warning.
     """
+    if short_window_burn < 0 or long_window_burn < 0:
+        raise ValueError("burn rates must be non-negative")
+    if short_window_burn >= 14.4 and long_window_burn >= 14.4:
+        page, severity, reason = True, "critical", "sustained_fast_burn"
+    elif short_window_burn >= 6.0 and long_window_burn >= 6.0:
+        page, severity, reason = True, "high", "sustained_burn"
+    elif short_window_burn >= 14.4:
+        page, severity, reason = False, "warning", "transient_short_window_spike"
+    elif long_window_burn >= 1.0:
+        page, severity, reason = False, "warning", "slow_budget_consumption"
+    else:
+        page, severity, reason = False, "info", "within_error_budget"
     return {
-        "page": False,
-        "severity": "info",
-        "reason": "starter_policy_not_implemented",
+        "page": page,
+        "severity": severity,
+        "reason": reason,
         "short_window_burn": short_window_burn,
         "long_window_burn": long_window_burn,
     }

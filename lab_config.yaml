@@ -11,7 +11,7 @@ slo:
     threshold_minutes: 60
 
 anomaly:
-  default_method: zscore
+  default_method: auto
   zscore_threshold: 3.0
   mean_ratio_threshold: 3.0
 

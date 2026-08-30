@@ -1,8 +1,4 @@
-"""Anomaly detection starter.
-
-Z-score is deliberately the default baseline. Students should improve `auto`
-mode for seasonality/outliers rather than deleting the simple implementation.
-"""
+"""Simple Z-score plus robust context-aware anomaly detection."""
 from __future__ import annotations
 
 from typing import Any, Iterable
@@ -29,17 +25,20 @@ def zscore_detector(current: float, history: Iterable[float], threshold: float =
 
 
 def mad_detector(current: float, history: Iterable[float], threshold: float = 3.5) -> dict[str, Any]:
-    """Robust example, intentionally incomplete around zero-MAD edge cases.
-
-    Students may improve this function and/or use it from auto mode.
-    """
+    """Outlier-resistant detector with explicit zero-MAD behavior."""
     values = np.asarray(list(history), dtype=float)
     if values.size < 5:
         return {"is_anomaly": False, "score": 0.0, "method": "mad", "reason": "insufficient_history"}
     median = float(np.median(values))
     mad = float(np.median(np.abs(values - median)))
     if mad == 0:
-        return {"is_anomaly": False, "score": 0.0, "method": "mad", "reason": "mad_is_zero_todo"}
+        score = float("inf") if float(current) != median else 0.0
+        return {
+            "is_anomaly": bool(score > threshold),
+            "score": score,
+            "method": "mad",
+            "reason": f"median={median:.3f}, mad=0; exact_baseline=true",
+        }
     modified_z = 0.6745 * abs(float(current) - median) / mad
     return {
         "is_anomaly": bool(modified_z > threshold),
@@ -59,22 +58,34 @@ def detect_anomaly(
 ) -> dict[str, Any]:
     """Stable lab API.
 
-    Current starter behavior:
+    Supported behavior:
     - `zscore`: basic z-score.
-    - `mad`: MAD example.
-    - `auto`: still uses naive z-score and ignores context.
-
-    TODO(student): make `auto` context-aware. Useful context keys used by the
-    instructor may include `day_of_week`, `same_segment_history`,
-    `metric_name`, `known_event`, and `trend`.
+    - `mad`: outlier-resistant median/MAD detector.
+    - `auto`: prefers caller-provided same-segment history, uses MAD with a
+      z-score fallback for short history, and suppresses declared known events.
     """
     if method == "mad":
-        return mad_detector(current, history)
-    if method in {"zscore", "auto"}:
+        return mad_detector(current, history, threshold=max(3.5, threshold))
+    if method == "zscore":
         result = zscore_detector(current, history, threshold=threshold)
-        if method == "auto":
-            result["method"] = "auto:zscore"
-            if context:
-                result["reason"] += "; context_ignored_by_starter=true"
+        return result
+    if method == "auto":
+        context = context or {}
+        if context.get("known_event"):
+            return {
+                "is_anomaly": False,
+                "score": 0.0,
+                "method": "auto:known_event",
+                "reason": f"suppressed_known_event={context['known_event']}",
+            }
+        segmented = context.get("same_segment_history")
+        values = list(segmented) if segmented is not None else list(history)
+        result = mad_detector(current, values, threshold=max(3.5, threshold))
+        if result["reason"] == "insufficient_history":
+            result = zscore_detector(current, values, threshold=threshold)
+        result["method"] = "auto:same-segment-mad" if segmented is not None else f"auto:{result['method']}"
+        metric = context.get("metric_name")
+        if metric:
+            result["reason"] += f"; metric={metric}"
         return result
     raise ValueError(f"Unsupported method: {method}")

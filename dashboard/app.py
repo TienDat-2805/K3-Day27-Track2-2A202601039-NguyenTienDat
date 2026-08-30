@@ -12,7 +12,7 @@ HISTORY = ROOT / "data" / "history" / "metrics_history.csv"
 
 st.set_page_config(page_title="Data Reliability Lab", layout="wide")
 st.title("Data Reliability Game Day")
-st.caption("Starter dashboard - improve it only if it helps incident decisions.")
+st.caption("Operational data-quality signals for incident triage")
 
 if not REPORT.exists():
     st.warning("Run `make baseline` first to generate reports/latest_metrics.json")
@@ -33,11 +33,33 @@ st.json({
     "contract_slo": report["contract_slo"],
 })
 
+slo = report["contract_slo"]
+kb_failures = report.get("kb_failed_contract_checks", 0)
+incident_open = bool(
+    report["critical_contract_failures"]
+    or kb_failures
+    or report["row_count_anomaly"]["is_anomaly"]
+)
+s1, s2, s3, s4 = st.columns(4)
+s1.metric("Contract SLO", f"{slo['target'] * 100:.2f}%")
+s2.metric("Burn rate", f"{slo['burn_rate']:.2f}x")
+s3.metric(
+    "Error budget remaining",
+    f"{slo['remaining_error_budget_fraction'] * 100:.1f}%",
+)
+s4.metric("Incident", "OPEN" if incident_open else "HEALTHY")
+
+if incident_open:
+    st.error(
+        "Investigate contract/anomaly signals. Owners: commerce-data and "
+        "support-ai. See reports/incident_report.md for mitigation and runbook."
+    )
+else:
+    st.success("All current reliability gates are healthy.")
+
 history = pd.read_csv(HISTORY)
 st.subheader("Historical row count")
 st.line_chart(history.set_index("date")[["row_count"]])
 
 st.subheader("Example blast radius")
 st.write("stg_orders -> " + " -> ".join(report["sample_blast_radius_from_stg_orders"]))
-
-st.info("TODO: add SLO target, remaining error budget, burn-rate windows, owner/runbook links, and incident status.")

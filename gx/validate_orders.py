@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Small Great Expectations Core 1.21 example.
-
-This file demonstrates the modern dataframe flow with a few expectations.
-Students should extend it into a reusable Expectation Suite / Validation
-Definition / Checkpoint and design actions based on severity.
-"""
+"""Reusable Great Expectations Suite/ValidationDefinition/Checkpoint flow."""
 from __future__ import annotations
 
 import sys
@@ -21,16 +16,13 @@ except ImportError as exc:  # friendlier classroom failure
     raise SystemExit("great_expectations is not installed. Run: pip install -r requirements.txt") from exc
 
 
-def main() -> None:
-    df = pd.read_csv(ROOT / "data" / "incoming" / "orders.csv")
-    context = gx.get_context()
+def build_checkpoint(context: gx.DataContext):
+    """Build the complete in-memory orders validation flow."""
 
     # Use unique names so re-running inside an ephemeral context is simple.
     data_source = context.data_sources.add_pandas("orders_pandas")
     asset = data_source.add_dataframe_asset(name="orders_dataframe")
     batch_definition = asset.add_batch_definition_whole_dataframe("whole_orders")
-    batch = batch_definition.get_batch(batch_parameters={"dataframe": df})
-
     expectations = [
         gx.expectations.ExpectColumnValuesToNotBeNull(
             column="order_id", severity="critical"
@@ -45,15 +37,46 @@ def main() -> None:
             column="currency", value_set=["USD", "VND"], severity="critical"
         ),
     ]
-
-    all_ok = True
+    suite = context.suites.add(gx.ExpectationSuite(name="orders_contract_suite"))
+    # Expectations are added after registration so GX persists each mutation.
     for expectation in expectations:
-        result = batch.validate(expectation)
-        all_ok = all_ok and bool(result.success)
-        print(f"{expectation.__class__.__name__:<40} success={result.success}")
+        suite.add_expectation(expectation)
 
-    print("\nStarter GX result:", "PASS" if all_ok else "FAIL")
-    print("TODO: package these expectations into a Suite + ValidationDefinition + Checkpoint + Actions.")
+    validation = context.validation_definitions.add(
+        gx.ValidationDefinition(
+            name="orders_contract_validation",
+            data=batch_definition,
+            suite=suite,
+        )
+    )
+    checkpoint = context.checkpoints.add(
+        gx.Checkpoint(
+            name="orders_contract_checkpoint",
+            validation_definitions=[validation],
+            actions=[],
+        )
+    )
+    return checkpoint
+
+
+def main() -> None:
+    df = pd.read_csv(ROOT / "data" / "incoming" / "orders.csv")
+    context = gx.get_context(mode="ephemeral")
+    checkpoint = build_checkpoint(context)
+    result = checkpoint.run(batch_parameters={"dataframe": df})
+    all_ok = bool(result.success)
+
+    # Local action: critical failures quarantine the complete incoming batch.
+    # In production this hook would route to object storage/table partition and
+    # notify orchestration; writing under reports keeps the lab fully local.
+    action = "continue"
+    if not all_ok:
+        quarantine = ROOT / "reports" / "quarantine_orders.csv"
+        df.to_csv(quarantine, index=False)
+        action = f"quarantine:{quarantine.relative_to(ROOT)}"
+
+    print("GX checkpoint result:", "PASS" if all_ok else "FAIL")
+    print("Action:", action)
 
 
 if __name__ == "__main__":

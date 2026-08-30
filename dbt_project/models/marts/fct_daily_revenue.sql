@@ -8,7 +8,9 @@ with completed_orders as (
     where status = 'completed'
 ),
 active_customers as (
-    select *
+    -- Defensive uniqueness protects the revenue grain if an upstream SCD
+    -- accidentally exposes two active versions for one customer.
+    select distinct customer_id
     from {{ ref('stg_customers') }}
     where is_active = true
 )
